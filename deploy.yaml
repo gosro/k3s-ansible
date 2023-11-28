@@ -1,0 +1,13 @@
+- hosts: cluster
+  max_fail_percentage: 0
+  roles:
+    - role: roles/download
+    - role: roles/prepare
+
+- hosts: master
+  roles:
+    - role: roles/master
+
+- hosts: worker
+  roles:
+    - role: roles/worker

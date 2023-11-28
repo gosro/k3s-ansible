@@ -1,0 +1,117 @@
+- name: Inventory name to hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Add Ansible inventory mappings to /etc/hosts
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for host in groups['cluster'] %}
+      {{ hostvars[host].ansible_host }} {{ host }}
+      {% endfor %}
+
+- name: Check is ufw installed
+  shell: command -v ufw >/dev/null 2>&1
+  register: is_ufw_exist
+  ignore_errors: yes
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Disabling ufw
+  command: ufw disable
+  become: yes
+  when: ansible_distribution == 'Ubuntu' and is_ufw_exist.rc == 0
+
+- name: Stop and disable firewalld.
+  service:
+    name: firewalld
+    state: stopped
+    enabled: False
+    masked: yes
+  when: ansible_distribution == 'CentOS' or ansible_distribution == 'RedHat'
+
+- name: Install ipvs tools
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+    pkg:
+    - ipset
+    - ipvsadm
+  register: apt_action
+  retries: 10
+  until: apt_action is success or ('Failed to lock apt for exclusive operation' not in apt_action.msg and '/var/lib/dpkg/lock' not in apt_action.msg)
+  when: ansible_distribution == 'Ubuntu' and kubeproxy is match(".*proxy-mode=ipvs.*")
+
+- name: Install ipvs tools
+  yum:
+    update_cache: yes
+    name:
+    - ipset
+    - ipvsadm
+    state: present
+  when: (ansible_distribution == 'CentOS' or ansible_distribution == 'RedHat') and kubeproxy is match(".*proxy-mode=ipvs.*")
+
+- name: Disable Swap
+  command: swapoff -a
+
+- name: Ensure swap file doesn't exist
+  file:
+    path: '/swapfile'
+    state: absent
+
+- name: Set systemctl parameters
+  template:
+    dest: /etc/sysctl.d/60-k3s.conf
+    src: sysctl.j2
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Test for br_netfilter module
+  shell: grep -c "br_netfilter" /etc/modules-load.d/k3s.conf || true
+  register: br_netfilter
+
+- name: touch /etc/modules-load.d/k3s.conf
+  file:
+    path: /etc/modules-load.d/k3s.conf
+    state: touch
+
+- name: Set br_netfilter
+  lineinfile:
+    dest: /etc/modules-load.d/k3s.conf
+    line: br_netfilter
+  when: br_netfilter.stdout == "0"
+
+- name: Test for ip_conntrack module
+  shell: grep -c "ip_conntrack" /etc/modules-load.d/k3s.conf || true
+  register: ip_conntrack
+
+- name: Set ip_conntrack
+  lineinfile:
+    dest: /etc/modules-load.d/k3s.conf
+    line: ip_conntrack
+  when: ip_conntrack.stdout == "0"
+
+- name: Set kernel modules list
+  copy:
+    dest: /etc/modules-load.d/k3s.conf
+    content: |
+      ip_vs
+      ip_vs_{{ kubeproxy | select('match', 'ipvs-scheduler') | first | regex_replace("^.+=","") }}
+      nf_conntrack
+  when: kubeproxy is match(".*ipvs-scheduler.*") and kubeproxy is match(".*proxy-mode=ipvs.*")
+
+- name: Load modules
+  shell: |
+    cat /etc/modules-load.d/k3s.conf | xargs -n 1 modprobe --
+  when: kubeproxy is match(".*ipvs-scheduler.*") and kubeproxy is match(".*proxy-mode=ipvs.*")
+
+- name: Sysctl apply
+  command: sysctl -p
+
+- name: Setup aliases
+  copy:
+    dest: /etc/profile.d/k3s.sh
+    content: |
+      alias "kubectl=k3s kubectl"
+      alias "crictl=k3s crictl"
+    mode: '0644'

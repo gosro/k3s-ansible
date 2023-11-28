@@ -1,0 +1,21 @@
+ansible_user: my-user
+
+cluster_name: "oa-cluster.local"
+
+proxy_proto: "http"
+proxy_address: "192.168.152.9:3128"
+
+k3s_version: v1.24.4+k3s1
+
+# ipvs or iptables alowed
+kubeproxy:
+  - proxy-mode=iptables
+
+kubeletargs: 
+  - container-runtime=remote
+  - container-log-max-files=2
+  - container-log-max-size=10Mi
+
+disable:
+  - traefik
+  - servicelb

@@ -1,0 +1,20 @@
+[cluster]
+master-1 ansible_host=192.168.1.1
+master-2 ansible_host=192.168.1.2
+master-3 ansible_host=192.168.1.3
+worker-7 ansible_host=192.168.1.7
+worker-8 ansible_host=192.168.1.8
+
+[master]
+master-1
+master-2
+master-3
+
+[worker]
+master-1
+master-2
+master-3
+worker-7
+worker-8
+
+[delete]

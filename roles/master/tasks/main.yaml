@@ -1,0 +1,217 @@
+- name: Check that the k3s config exists
+  stat:
+    path: /etc/rancher/k3s/config.yaml
+  register: config_exists
+
+- name: Remember existing nodes
+  set_fact:
+    existedNode: true
+  when: config_exists.stat.exists
+
+- name: Remember new nodes
+  set_fact:
+    existedNode: false
+  when: not config_exists.stat.exists
+
+- name: Generate node list
+  set_fact: 
+    existing_node_list: | 
+      [{% for item in ansible_play_batch -%}
+      {% if hostvars[item].existedNode == true %}
+      "{{ hostvars[item].inventory_hostname }}",
+      {% endif %}
+      {%- endfor %}]
+  delegate_to: 127.0.0.1
+  run_once: true
+
+- name: Cluster healthcheck
+  shell: |
+    {% raw %}k3s kubectl get node --selector='node-role.kubernetes.io/master' -o go-template='{{range $item := .items}}{{with $nodename := $item.metadata.name}}{{printf "%s\n" $nodename}}{{end}}{{end}}'{% endraw %}
+  register: nodes
+  retries: 5
+  delay: 10
+  until: nodes.stdout_lines | count == existing_node_list | count
+  when: inventory_hostname == groups['master'][0] and config_exists.stat.exists
+  run_once: true
+
+- name: Copy k3s file
+  copy:
+    src: /tmp/ansible_k3s/k3s
+    dest: /usr/local/bin/
+    mode: a+x
+    remote_src: yes
+
+- name: Set k3s proxy
+  template:
+    src: 'k3s.service.env.j2'
+    dest: /lib/systemd/system/k3s.service.env
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: proxy_proto is defined and proxy_address is defined
+
+- name: Add systemd k3s-server.service
+  template:
+    src: 'k3s.service.j2'
+    dest: /lib/systemd/system/k3s.service
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname == groups['master'][0]
+  vars:
+    cmd: "server --cluster-init"
+  run_once: true
+
+- name: Add systemd k3s-server.service
+  template:
+    src: 'k3s.service.j2'
+    dest: /lib/systemd/system/k3s.service
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname != groups['master'][0]
+  vars:
+    cmd: "server"
+
+- name: Create /etc/rancher/k3s directory
+  file:
+    path: /etc/rancher/k3s/
+    state: directory
+    mode: '0644'
+
+- name: Generate a token for adding nodes
+  shell: date +%s | sha256sum | head -c 32 ; echo
+  delegate_to: "{{ groups['master'][0] }}"
+  args:
+    executable: /bin/bash
+  when: not config_exists.stat.exists
+  register: k3s_token
+
+- name: Add k3s token to token holder
+  add_host:
+    name:  "K3S_TOKEN"
+    token: "{{ k3s_token.stdout }}"
+  when: not config_exists.stat.exists
+
+- name: Reading k3s token
+  shell: cat /etc/rancher/k3s/config.yaml | grep token | awk '{print$2}'
+  delegate_to: "{{ groups['master'][0] }}" 
+  when: config_exists.stat.exists
+  register: k3s_token
+
+- name: Add k3s token to token holder
+  add_host:
+    name:  "K3S_TOKEN"
+    token: "{{ k3s_token.stdout }}"
+  when: config_exists.stat.exists
+
+- name: Add registry-mirror config to masters
+  template:
+    src: 'registries.j2'
+    dest: /etc/rancher/k3s/registries.yaml
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: registry_mirror is defined or registry_private is defined
+
+- name: Add first master k3s config
+  template:
+    src: 'k3s-config.j2'
+    dest: /etc/rancher/k3s/config.yaml
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname == groups['master'][0]
+  run_once: true
+
+- name: Enable first master systemd k3s.service
+  systemd:
+    name: k3s.service
+    daemon_reload: yes
+    enabled: yes
+    masked: no
+    state: restarted
+  when: inventory_hostname == groups['master'][0]
+  run_once: true
+
+- name: Add other masters k3s config
+  template:
+    src: 'k3s-config.j2'
+    dest: /etc/rancher/k3s/config.yaml
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname != groups['master'][0]
+
+- name: Unmask k3s services
+  systemd:
+    name: k3s.service
+    daemon_reload: yes
+    enabled: yes
+    masked: no
+  when: inventory_hostname != groups['master'][0]
+
+- name: Start k3s masters
+  command: systemctl start k3s.service
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+  when: inventory_hostname != groups['master'][0]
+
+- name: Wait masters
+  shell: |
+    {% raw %}k3s kubectl get node --selector='node-role.kubernetes.io/master' -o go-template='{{range $item := .items}}{{with $nodename := $item.metadata.name}}{{printf "%s\n" $nodename}}{{end}}{{end}}'{% endraw %}
+  register: nodes
+  retries: 5
+  delay: 10
+  until: nodes.stdout_lines | count == groups['master'] | count
+  when: inventory_hostname == groups['master'][0]
+  run_once: true
+
+- name: Get node taints
+  shell: |
+    {% raw %}k3s kubectl get nodes -o go-template='{{range $item := .items}}{{with $nodename := $item.metadata.name}}{{range $taint := $item.spec.taints}}{{if and (eq $taint.key "node-role.kubernetes.io/master") (eq $taint.effect "NoSchedule")}}{{printf "%s\n" $nodename}}{{end}}{{end}}{{end}}{{end}}'{% endraw %}
+  register: taints
+  retries: 5
+  delay: 10
+
+- name: Enable scheduling
+  shell: |
+    k3s kubectl taint nodes {{inventory_hostname}} node-role.kubernetes.io/master:NoSchedule-
+  ignore_errors: yes
+  when: inventory_hostname in taints.stdout_lines
+
+- name: Set master node taint
+  shell: |
+    k3s kubectl taint nodes {{ inventory_hostname }} node-role.kubernetes.io/master:NoSchedule
+  when: inventory_hostname not in groups['worker']
+
+- name: Create directory .kube
+  file:
+    path: ~{{ ansible_user }}/.kube
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: "u=rwx,g=rx,o="
+
+- name: Copy config file to user home directory
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: ~{{ ansible_user }}/.kube/config
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    mode: "u=rw,g=,o="
+
+- name: Replace https://localhost:6443 by https://['ansible_host']:6443
+  command: >-
+    k3s kubectl config set-cluster default
+      --server=https://{{ hostvars[inventory_hostname]['ansible_host'] }}:6443
+      --kubeconfig ~{{ ansible_user }}/.kube/config
+  changed_when: true
+
+- name: Fetch kubeconfig
+  fetch:
+    src: ~{{ ansible_user }}/.kube/config
+    dest: kubeconfig
+    flat: yes
+  when: inventory_hostname == groups['master'][0]

@@ -1,0 +1,72 @@
+- name: Check if k3s service exists
+  command: systemctl cat k3s
+  check_mode: no
+  register: k3s_exists
+  changed_when: False
+  failed_when: k3s_exists.rc not in [0, 1]
+
+- name: Stop service k3s.service
+  systemd:
+    name: k3s.service
+    state: stopped
+  when: k3s_exists.rc == 0
+
+- name: Disable service k3s
+  systemd:
+    name: k3s.service
+    enabled: no
+    masked: yes
+  when: k3s_exists.rc == 0
+
+- name: Remove k3s.service
+  file:
+    state: absent
+    path: /lib/systemd/system/k3s.service
+
+- name: Remove k3s.service
+  file:
+    state: absent
+    path: /etc/systemd/system/k3s.service
+
+- name: Remove k3s.service
+  file:
+    state: absent
+    path: /lib/systemd/system/k3s.service.env
+
+- name: Remove k3s
+  file:
+    state: absent
+    path: /usr/local/bin/k3s
+
+- name: Remove /var/lib/rancher/
+  file:
+    state: absent
+    path: /var/lib/rancher/
+
+- name: Remove /etc/rancher/
+  file:
+    state: absent
+    path: /etc/rancher/
+
+- name: Kill containerd shim
+  command: pkill -9 -f "k3s/data/[^/]+/bin/containerd-shim-runc"
+  register: result
+  changed_when: "result.rc == 0"
+  failed_when: false
+
+- name: Daemon reload
+  command: systemctl daemon-reload
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+
+- name: Reset failed units
+  command: systemctl reset-failed
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+
+#- name: Reboot
+#  reboot:

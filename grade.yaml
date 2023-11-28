@@ -1,0 +1,8 @@
+- hosts: cluster
+  roles:
+    - role: roles/download
+
+- hosts: cluster
+  serial: 1
+  roles:
+    - role: roles/grade

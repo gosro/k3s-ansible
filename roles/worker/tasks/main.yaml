@@ -1,0 +1,65 @@
+- name: Copy k3s file
+  copy:
+    src: /tmp/ansible_k3s/k3s
+    dest: /usr/local/bin/
+    mode: a+x
+    remote_src: yes
+
+- name: Set k3s proxy
+  template:
+    src: 'k3s.service.env.j2'
+    dest: /lib/systemd/system/k3s.service.env
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: proxy_proto is defined and proxy_address is defined
+
+- name: Add k3s agent service
+  template:
+    src: 'k3s.service.j2'
+    dest: /lib/systemd/system/k3s.service
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname not in groups['master']
+  vars:
+    cmd: agent
+
+- name: Create /etc/rancher/k3s directory
+  file:
+    path: /etc/rancher/k3s/
+    state: directory
+    mode: '0644'
+
+- name: Add registry-mirror config to workers
+  template:
+    src: 'registries.j2'
+    dest: /etc/rancher/k3s/registries.yaml
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: registry_mirror is defined or registry_private is defined
+
+- name: Add k3s agent config
+  template:
+    src: 'k3s-config.j2'
+    dest: /etc/rancher/k3s/config.yaml
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+  when: inventory_hostname not in groups['master']
+
+- name: Unmask k3s services
+  systemd:
+    name: k3s.service
+    daemon_reload: yes
+    enabled: yes
+    masked: no
+
+- name: Start k3s agents
+  command: systemctl start k3s.service
+  retries: 5
+  delay: 10
+  register: result
+  until: result.rc == 0
+  when: inventory_hostname not in groups['master']

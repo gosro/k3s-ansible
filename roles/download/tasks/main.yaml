@@ -1,0 +1,23 @@
+- name: Create download directory
+  file:
+    path: /tmp/ansible_k3s/
+    state: directory
+
+- name: Download k3s with check (sha256)
+  get_url:
+    url: "{{ k3s_download_url }}"
+    dest: /tmp/ansible_k3s/
+    checksum: sha256:"{{ k3s_binary_checksum }}"
+  environment:
+    http_proxy: "{{ proxy_proto }}://{{ proxy_address }}"
+    https_proxy: "{{ proxy_proto }}://{{ proxy_address }}"
+  when: proxy_proto is defined and proxy_address is defined
+
+- name: Download k3s with check (sha256)
+  get_url:
+    url: "{{ k3s_download_url }}"
+    dest: /tmp/ansible_k3s/
+    checksum: sha256:"{{ k3s_binary_checksum }}"
+  when: proxy_proto is not defined and proxy_address is not defined
+
+

@@ -1,0 +1,26 @@
+- name: Update k3s file
+  copy:
+    src: /tmp/ansible_k3s/k3s
+    dest: /usr/local/bin/
+    mode: a+x
+    remote_src: yes
+
+- name: Restart k3s.service
+  systemd:
+    name: k3s.service
+    state: restarted
+    daemon_reload: yes
+
+- name: Wait for port
+  wait_for:
+    port: 10250
+
+- name: Checking nodes status
+  shell: |
+    {% raw %}JSONPATH='{range .items[*]}{range @.status.conditions[*]}
+    {@.type}={@.status}{end}{end}' && k3s kubectl get nodes -o jsonpath="$JSONPATH" | grep "Ready=True"{% endraw %}
+  register: nodes
+  retries: 50
+  delay: 1
+  until: nodes.stdout_lines | count == groups['cluster'] | count
+  delegate_to: "{{ groups['master'][0] }}" 

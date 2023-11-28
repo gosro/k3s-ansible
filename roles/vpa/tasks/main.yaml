@@ -1,0 +1,52 @@
+- name: install openssl 
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+    pkg: openssl
+  register: apt_action
+  retries: 10    
+
+- name: Create /etc/rancher/k3s/vpa
+  file:
+    path: /etc/rancher/k3s/vpa/manifests
+    state: directory
+    mode: '0755'
+
+- name: copy scripts
+  copy: 
+    src: "{{ item }}" 
+    dest: /etc/rancher/k3s/vpa
+    owner: root 
+    group: root
+    mode: 0770
+  with_fileglob:
+    - delete-webhook.sh
+    - gencerts.sh
+    - rmcerts.sh
+    - vpa-down.sh
+    - vpa-process-yaml.sh
+    - vpa-process-yamls.sh
+    - vpa-up.sh
+    - warn-obsolete-vpa-objects.sh
+
+- name: Copy manifests for kubernetes 1.16+
+  copy: 
+    src: "{{ item }}" 
+    dest: /etc/rancher/k3s/vpa/manifests
+    owner: root 
+    group: root
+    mode: 0660
+  with_fileglob:
+    - kube1.16+/*
+  when: k3s_version | regex_search('1.[0-9]{2}') | float >= 1.16 and k3s_version | regex_search('1.[0-9]{2}') | float < 1.22
+
+- name: Copy manifests for kubernetes 1.22+
+  copy: 
+    src: "{{ item }}" 
+    dest: /etc/rancher/k3s/vpa/manifests
+    owner: root 
+    group: root
+    mode: 0660
+  with_fileglob:
+    - kube1.22+/*
+  when: k3s_version | regex_search('1.[0-9]{2}') | float >= 1.22

@@ -1,0 +1,26 @@
+{% if inventory_hostname in groups['master'] and inventory_hostname != groups['master'][0] %}
+server: https://{{ hostvars[groups['master'][0]]['ansible_host'] }}:6443
+{% endif %}
+token: {{ hostvars['K3S_TOKEN']['token'] }}
+bind-address: {{ ansible_host }}
+{% if flannel_interface is defined %}
+flannel-iface: {{ flannel_interface }}
+{% endif %}
+node-ip: {{ ansible_host }}
+tls-san:
+  - "{{ cluster_name }}"
+{% if disable is defined %}
+disable: {{ disable }}
+{% endif %}
+{% if kubeletargs is defined %}
+kubelet-arg: {{ kubeletargs }}
+{% endif %}
+{% if kubeproxy is defined %}
+kube-proxy-arg: [ 'conntrack-max-per-core=0'{% for kubeproxy in kubeproxy %}, '{{ kubeproxy }}'{% endfor %}]{% endif %}
+{% if kubeproxy is not defined %}
+kube-proxy-arg: [ 'conntrack-max-per-core=0' ]
+{% endif %}
+{% if cluster_domain is defined %}
+cluster-domain: 
+  - "{{ cluster_domain }}"
+{% endif%}

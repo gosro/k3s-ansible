@@ -1,0 +1,6 @@
+- hosts: delete
+  roles:
+    - role: roles/delete
+      when: inventory_hostname in groups['delete'] and inventory_hostname not in groups['worker'] and inventory_hostname not in groups['master']
+    - role: roles/reset
+      when: inventory_hostname in groups['delete'] and inventory_hostname not in groups['worker'] and inventory_hostname not in groups['master']

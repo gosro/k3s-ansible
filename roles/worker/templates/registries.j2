@@ -1,0 +1,17 @@
+{% if registry_mirror is defined %}
+mirrors:
+{% for registry, mirror in registry_mirror.items() %}
+  {{ registry }}:
+    endpoint:
+      - "{{ mirror }}"
+{% endfor %}
+{% endif %}
+{% if registry_private is defined %}
+configs:
+{% for priv_registry in registry_private %}
+  "{{ priv_registry.registry }}":
+    auth:
+      username: {{ priv_registry.user }}
+      password: {{ priv_registry.pass }}
+{% endfor %}
+{% endif %}

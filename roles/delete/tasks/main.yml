@@ -1,0 +1,8 @@
+- name: Drain node {{ inventory_hostname }}
+  command: k3s kubectl drain {{ inventory_hostname }} --delete-emptydir-data --ignore-daemonsets
+  delegate_to: "{{ groups['master'][0] }}"
+
+- name: Delete node {{ inventory_hostname }} from cluster 
+  command: k3s kubectl delete node {{ inventory_hostname }}
+  delegate_to: "{{ groups['master'][0] }}"
+  ignore_errors: yes

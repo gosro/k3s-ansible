@@ -1,0 +1,137 @@
+# Релизный репозиторий Ansible K3s, средства деплоя Kubernetes-кластеров
+
+## Доступные версии
+
+    v1.17.17+k3s1
+    v1.18.17+k3s1
+    v1.18.20+k3s1
+    v1.19.12+k3s1
+    v1.20.4+k3s1
+    v1.20.5+k3s1
+    v1.20.8+k3s1
+    v1.21.1+k3s1
+    v1.21.2+k3s1
+    v1.21.3+k3s1
+    v1.21.4+k3s1
+    v1.21.5+k3s2
+    v1.22.2+k3s2
+    v1.22.4+k3s1
+    v1.23.3+k3s1
+    v1.23.4+k3s1
+    v1.24.2+k3s1
+    v1.24.3+k3s1
+    v1.24.4+k3s1
+    v1.25.6+k3s1
+    v1.26.0+k3s2
+    v1.26.1+k3s1
+    v1.26.3+k3s1
+
+## Деплой кластера
+
+Необходимые шаги:
+
+- Описать имена машин и ip-адреса в hosts.ini файле `\inventory\hosts.ini`:
+
+```ini
+[cluster]
+node-91 ansible_host=192.168.1.93
+node-92 ansible_host=192.168.1.94
+node-93 ansible_host=192.168.1.95
+
+[master]
+node-91
+node-92
+node-93
+
+[worker]
+node-91
+node-92
+node-93
+```
+
+При этом все хосты на которых ожидается запуск контейнеров должны быть перечислены в разделе worker, в том числе ноды с ролью мастер, если на них предполагается скедулинг подов.
+
+- Создать файл .gitlab-ci.yml следующего содержания:
+
+```yaml
+stages:
+  - deploy
+  - grade
+  - reset
+
+image: ${ CI_REGISTRY }/ansible:latest
+
+variables:
+  ANSIBLE_HOST_KEY_CHECKING: "False"
+
+before_script:
+    - mkdir -p ~/.ssh
+    - echo "$id_rsa" | base64 -d > ~/.ssh/id_rsa
+    - chmod -R 700 ~/.ssh
+
+deploy:
+  stage: deploy
+  when: manual
+  script:
+    - ansible-playbook -u root --key-file=~/.ssh/id_rsa -i inventory/hosts.ini deploy.yaml
+
+grade:
+  stage: grade
+  when: manual
+  script:
+    - ansible-playbook -u root --key-file=~/.ssh/id_rsa -i inventory/hosts.ini grade.yaml
+
+reset:
+  stage: reset
+  when: manual
+  script:
+    - ansible-playbook -u root --key-file=~/.ssh/id_rsa -i inventory/hosts.ini reset.yaml
+```
+
+- Добавить в переменные окружения проекта приватный ключ для ssh в переменную id_rsa. Необходимость этого шага раскрыта в before_script файла пайплайна .gitlab-ci.yml
+
+## Ручной Деплой кластера
+- Копируем конфигуарцию примера
+```sh
+cp -r inventory/example-cluster inventory/my-cluster
+```
+- Меняем ansible_user в all.yaml в папке group_vars
+```sh
+sudo nano inventory/kgok-cluster/group_vars/all.yaml
+```
+```yaml
+ansible_user: my-user
+
+cluster_name: "oa-cluster.local"
+
+k3s_version: v1.24.4+k3s1
+
+# ipvs or iptables alowed
+kubeproxy:
+  - proxy-mode=iptables
+
+kubeletargs: 
+  - container-runtime=remote
+  - container-log-max-files=2
+  - container-log-max-size=10Mi
+
+disable:
+  - traefik
+  - servicelb
+```
+
+Параметр "ansible_user" является пользователем по которму происходит ssh подключения по ключу на сервер, например если ваш юзер на сервере "my-user" то и "ansible_user" должен иметь идентичное значение
+- Запускаем деплой кластера
+```sh
+sudo ansible-playbook --key-file=/home/my-user/.ssh/id_rsa -i inventory/my-cluster/hosts.ini deploy.yaml -b
+```
+После успешного деплоя на хосте надо установить kubectl
+```sh
+curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+```
+Файл конфигураций лежит на целевом хосте в домашней дериктории:
+```sh
+cat /home/my-user/.kube/config
+```
